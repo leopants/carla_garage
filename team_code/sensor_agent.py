@@ -150,6 +150,11 @@ class SensorAgent(autonomous_agent.AutonomousAgent):
         if self.config.compile or self.compile:
           net = torch.compile(net, mode=self.config.compile_mode)
 
+        if strtobool(os.environ.get('TRT', 'False')):
+          # Optional TensorRT backend (see trt_inference.py). Builds and caches an engine on first use.
+          from trt_inference import TrtNet
+          net = TrtNet(net, self.config, os.path.join(self.config_path, file), self.device)
+
         self.nets.append(net)
 
     self.stuck_detector = 0
