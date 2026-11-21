@@ -5,6 +5,7 @@ leaderboard/leaderboard/leaderboard_evaluator.py file
 """
 
 import os
+import time
 from copy import deepcopy
 
 import cv2
@@ -54,6 +55,15 @@ def strtobool(v):
   return str(v).lower() in ('yes', 'y', 'true', 't', '1', 'True')
 
 
+def _to_float32(x):
+  """Recursively casts half-precision tensors back to float32 (nets run under autocast when USE_FP16=1)."""
+  if torch.is_tensor(x):
+    return x.float() if x.is_floating_point() else x
+  if isinstance(x, (list, tuple)):
+    return type(x)(_to_float32(v) for v in x)
+  return x
+
+
 class SensorAgent(autonomous_agent.AutonomousAgent):
   """
     Main class that runs the agents with the run_step function
@@ -74,6 +84,8 @@ class SensorAgent(autonomous_agent.AutonomousAgent):
     self.step = -1
     self.initialized = False
     self.device = torch.device('cuda:0')
+    self.use_fp16 = strtobool(os.environ.get('USE_FP16', 'False'))
+    print('USE_FP16: ', self.use_fp16)
 
     # Load the config saved during training
     with open(os.path.join(self.config_path, 'config.json'), 'rt', encoding='utf-8') as f:
@@ -146,9 +158,16 @@ class SensorAgent(autonomous_agent.AutonomousAgent):
         net.load_state_dict(state_dict, strict=True)
         net.cuda(device=self.device)
         net.eval()
+        if strtobool(os.environ.get('CHANNELS_LAST', 'False')):
+          net = net.to(memory_format=torch.channels_last)
 
         if self.config.compile or self.compile:
           net = torch.compile(net, mode=self.config.compile_mode)
+
+        if strtobool(os.environ.get('TRT', 'False')):
+          # Optional TensorRT backend (see trt_inference.py). Builds and caches an engine on first use.
+          from trt_inference import TrtNet
+          net = TrtNet(net, self.config, os.path.join(self.config_path, file), self.device)
 
         self.nets.append(net)
 
@@ -412,6 +431,7 @@ class SensorAgent(autonomous_agent.AutonomousAgent):
   @torch.inference_mode()  # Turns off gradient computation
   def run_step(self, input_data, timestamp, sensors=None):  # pylint: disable=locally-disabled, unused-argument
     self.step += 1
+    t_run0 = time.perf_counter()
 
     if not self.initialized:
       self._init()
@@ -423,7 +443,9 @@ class SensorAgent(autonomous_agent.AutonomousAgent):
       return control
 
     # Need to run this every step for GPS filtering
+    t_tick0 = time.perf_counter()
     tick_data = self.tick(input_data)
+    tick_ms = (time.perf_counter() - t_tick0) * 1000
 
     lidar_indices = []
     for i in range(self.config.lidar_seq_len):
@@ -506,6 +528,21 @@ class SensorAgent(autonomous_agent.AutonomousAgent):
       dt = self.config.carla_frame_rate
       self.meters_travelled = self.meters_travelled + speed * dt
 
+    # Optional (DUMP_INPUTS=<dir>): save the real network inputs every DUMP_EVERY steps, to compare backends offline.
+    dump_dir = os.environ.get('DUMP_INPUTS')
+    if dump_dir and self.step % int(os.environ.get('DUMP_EVERY', 8)) == 0:
+      os.makedirs(dump_dir, exist_ok=True)
+      torch.save(
+          {
+              'rgb': tick_data['rgb'].detach().cpu().to(torch.uint8),
+              'rgb_exact': bool(torch.equal(tick_data['rgb'].detach().cpu(), tick_data['rgb'].detach().cpu().to(torch.uint8).float())),
+              'lidar_bev': lidar_bev.detach().cpu(),
+              'target_point': tick_data['target_point'].detach().cpu(),
+              'ego_vel': velocity.detach().cpu(),
+              'command': tick_data['command'].detach().cpu(),
+              'step': self.step,
+          }, os.path.join(dump_dir, f'{self.step:05d}.pt'))
+
     # forward pass
     pred_wps = []
     pred_target_speeds = []
@@ -514,6 +551,20 @@ class SensorAgent(autonomous_agent.AutonomousAgent):
     wp_selected = None
     for i in range(self.model_count):
       if self.config.backbone in ('transFuser', 'aim', 'bev_encoder'):
+        # Optional half-precision inference (USE_FP16=1). Outputs are cast back to float32 for the controller code.
+        t_fwd0 = time.perf_counter()
+        with torch.autocast('cuda', dtype=torch.float16, enabled=self.use_fp16):
+          net_outputs = self.nets[i].forward(
+              rgb=tick_data['rgb'],
+              lidar_bev=lidar_bev,
+              target_point=tick_data['target_point'],
+              target_point_next=tick_data['target_point_next'] if self.config.two_tp_input else None,
+              ego_vel=velocity,
+              command=tick_data['command'])
+        if self.use_fp16:
+          net_outputs = _to_float32(net_outputs)
+        torch.cuda.synchronize()
+        fwd_ms = (time.perf_counter() - t_fwd0) * 1000
         pred_wp, \
         pred_target_speed, \
         pred_checkpoint, \
@@ -523,13 +574,7 @@ class SensorAgent(autonomous_agent.AutonomousAgent):
         pred_bb_features,\
         attention_weights,\
         pred_wp_1,\
-        selected_path = self.nets[i].forward(
-          rgb=tick_data['rgb'],
-          lidar_bev=lidar_bev,
-          target_point=tick_data['target_point'],
-          target_point_next=tick_data['target_point_next'] if self.config.two_tp_input else None,
-          ego_vel=velocity,
-          command=tick_data['command'])
+        selected_path = net_outputs
         # Only convert bounding boxes when they are used.
         if self.config.detect_boxes and (compute_debug_output or self.config.backbone in ('aim') or
                                          self.stop_sign_controller):
@@ -676,6 +721,39 @@ class SensorAgent(autonomous_agent.AutonomousAgent):
       brake = True
 
     control = carla.VehicleControl(steer=float(steer), throttle=float(throttle), brake=float(brake))
+
+    frames_dir = os.environ.get('DIAG_FRAMES')
+    if frames_dir and self.step <= int(os.environ.get('DIAG_FRAMES_MAX_STEP', 60)) and self.step % 3 == 0:
+      try:  # save exactly what the model sees (cropped RGB), to inspect exposure / colours
+        os.makedirs(frames_dir, exist_ok=True)
+        img = tick_data['rgb'][0].detach().cpu().numpy().transpose(1, 2, 0).clip(0, 255).astype(np.uint8)
+        cv2.imwrite(os.path.join(frames_dir, f'step_{self.step:04d}.png'), cv2.cvtColor(img, cv2.COLOR_RGB2BGR))
+      except Exception as e:
+        print('DIAG frames error:', e)
+
+    diag_path = os.environ.get('DIAG_LOG')
+    if diag_path and self.step % int(os.environ.get('DIAG_EVERY', 5)) == 0:
+      try:
+        from srunner.scenariomanager.carla_data_provider import CarlaDataProvider  # pylint: disable=locally-disabled, import-outside-toplevel
+        hero = CarlaDataProvider.get_hero_actor()
+        ht = hero.get_transform() if hero is not None else None
+        rec = {
+            'step': self.step,
+            'speed': float(gt_velocity.item()),
+            'tp': [float(v) for v in tick_data['target_point'][0].cpu().numpy()],
+            'cmd': int(self.commands[-2]),
+            'wp': [[float(a) for a in w] for w in self.pred_wp[0].detach().cpu().numpy()[:4]] if hasattr(self, 'pred_wp') else None,
+            'tgt_speed': float(pred_target_speed_scalar) if 'pred_target_speed_scalar' in locals() else None,
+            'ctrl': [float(steer), float(throttle), float(brake)],
+            'stop_sign': bool(stop_for_stop_sign) if self.stop_sign_controller else None,
+            'hero': [ht.location.x, ht.location.y, ht.rotation.yaw] if ht is not None else None,
+            'filt': [float(v) for v in self.state_log[-1]],
+            'tick_ms': tick_ms, 'fwd_ms': fwd_ms, 'run_ms': (time.perf_counter() - t_run0) * 1000,
+        }
+        with open(diag_path, 'a', encoding='utf-8') as f:
+          f.write(ujson.dumps(rec) + '\n')
+      except Exception as e:  # diagnostics must never break driving
+        print('DIAG error:', e)
 
     if self.IS_BENCH2DRIVE:
       # TODO doesn't seem to work
