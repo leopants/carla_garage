@@ -74,10 +74,10 @@ def get_traffic_light_waypoints(traffic_light, carla_map):
     distance_to_light = base_loc.distance(wpx.transform.location)
     eu_wps.append(wpx)
     next_distance_to_light = distance_to_light + 1.0
-    while not wpx.is_intersection:
+    while not wpx.is_junction:
       next_wp = wpx.next(0.5)[0]
       next_distance_to_light = base_loc.distance(next_wp.transform.location)
-      if next_wp and not next_wp.is_intersection \
+      if next_wp and not next_wp.is_junction \
           and next_distance_to_light <= distance_to_light:
         eu_wps.append(next_wp)
         distance_to_light = next_distance_to_light

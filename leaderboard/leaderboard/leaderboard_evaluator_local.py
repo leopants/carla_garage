@@ -165,10 +165,17 @@ class LeaderboardEvaluator(object):
     def find_free_port(self, start_port=2_000, end_port=40_000):
         for port in range(start_port, end_port + 1):
             s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            # On Windows SO_REUSEADDR lets bind() succeed on ports that are already in use
+            # (e.g. the CARLA RPC port 2000), so only set it elsewhere.
+            if os.name != 'nt':
+                s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            else:
+                s.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
 
             try:
-                s.bind(('localhost', port))
+                # Wildcard address on Windows: the traffic manager binds all interfaces, and a bind to
+                # localhost alone can succeed even when another process holds the same port on 0.0.0.0.
+                s.bind(('' if os.name == 'nt' else 'localhost', port))
                 return port
             except OSError as e: # Address already in use or Address already in use (WinError)
                 pass

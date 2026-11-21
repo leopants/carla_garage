@@ -97,7 +97,7 @@ class ScenarioLogger:
     tlights = actors.filter("*traffic_light*")
     self.tlights = []
     for tlight in tlights:
-      if tlight.state != carla.libcarla.TrafficLightState.Green:
+      if tlight.state != carla.TrafficLightState.Green:
         trigger_box_global_pos = tlight.get_transform().transform(tlight.trigger_volume.location)
         trigger_box_global_pos = carla.Location(x=trigger_box_global_pos.x,
                                                 y=trigger_box_global_pos.y,
@@ -174,9 +174,9 @@ class ScenarioLogger:
     tl_states = []
     tl_extents = []
     for tlight in self.tlights:
-      if tlight.state == carla.libcarla.TrafficLightState.Red:
+      if tlight.state == carla.TrafficLightState.Red:
         state = 0
-      elif tlight.state == carla.libcarla.TrafficLightState.Yellow:
+      elif tlight.state == carla.TrafficLightState.Yellow:
         state = 1
       else:  # unknown
         state = -1
