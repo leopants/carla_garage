@@ -17,7 +17,10 @@ import gaussian_target as g_t
 import random
 from sklearn.utils.class_weight import compute_class_weight
 from center_net import angle2class
-from imgaug import augmenters as ia
+try:
+  from imgaug import augmenters as ia  # Only needed for training augmentation
+except ImportError:  # imgaug is unmaintained and breaks on NumPy 2; inference does not need it
+  ia = None
 import pickle
 import re
 
@@ -62,8 +65,9 @@ class CARLA_Data(Dataset):  # pylint: disable=locally-disabled, invalid-name
     self.temporal_lidars = []
     self.temporal_measurements = []
 
-    self.image_augmenter_func = image_augmenter(config.color_aug_prob, cutout=config.use_cutout)
-    self.lidar_augmenter_func = lidar_augmenter(config.lidar_aug_prob, cutout=config.use_cutout)
+    # Augmenters are only used for training; skip them when imgaug is unavailable (inference-only setups).
+    self.image_augmenter_func = image_augmenter(config.color_aug_prob, cutout=config.use_cutout) if ia else None
+    self.lidar_augmenter_func = lidar_augmenter(config.lidar_aug_prob, cutout=config.use_cutout) if ia else None
 
     # Initialize with 1 example per class
     self.angle_distribution = np.arange(len(config.angles)).tolist()
@@ -245,21 +249,21 @@ class CARLA_Data(Dataset):  # pylint: disable=locally-disabled, invalid-name
     # https://github.com/pytorch/pytorch/issues/13246#issuecomment-905703662
     # A workaround is to store the string lists as numpy byte objects
     # because they only have 1 refcount.
-    self.images = np.array(self.images).astype(np.string_)
-    self.images_augmented = np.array(self.images_augmented).astype(np.string_)
-    self.semantics = np.array(self.semantics).astype(np.string_)
-    self.semantics_augmented = np.array(self.semantics_augmented).astype(np.string_)
-    self.bev_semantics = np.array(self.bev_semantics).astype(np.string_)
-    self.bev_semantics_augmented = np.array(self.bev_semantics_augmented).astype(np.string_)
-    self.depth = np.array(self.depth).astype(np.string_)
-    self.depth_augmented = np.array(self.depth_augmented).astype(np.string_)
-    self.lidars = np.array(self.lidars).astype(np.string_)
-    self.boxes = np.array(self.boxes).astype(np.string_)
-    self.future_boxes = np.array(self.future_boxes).astype(np.string_)
-    self.measurements = np.array(self.measurements).astype(np.string_)
+    self.images = np.array(self.images).astype(np.bytes_)
+    self.images_augmented = np.array(self.images_augmented).astype(np.bytes_)
+    self.semantics = np.array(self.semantics).astype(np.bytes_)
+    self.semantics_augmented = np.array(self.semantics_augmented).astype(np.bytes_)
+    self.bev_semantics = np.array(self.bev_semantics).astype(np.bytes_)
+    self.bev_semantics_augmented = np.array(self.bev_semantics_augmented).astype(np.bytes_)
+    self.depth = np.array(self.depth).astype(np.bytes_)
+    self.depth_augmented = np.array(self.depth_augmented).astype(np.bytes_)
+    self.lidars = np.array(self.lidars).astype(np.bytes_)
+    self.boxes = np.array(self.boxes).astype(np.bytes_)
+    self.future_boxes = np.array(self.future_boxes).astype(np.bytes_)
+    self.measurements = np.array(self.measurements).astype(np.bytes_)
 
-    self.temporal_lidars = np.array(self.temporal_lidars).astype(np.string_)
-    self.temporal_measurements = np.array(self.temporal_measurements).astype(np.string_)
+    self.temporal_lidars = np.array(self.temporal_lidars).astype(np.bytes_)
+    self.temporal_measurements = np.array(self.temporal_measurements).astype(np.bytes_)
     self.sample_start = np.array(self.sample_start)
     if rank == 0:
       print(f'Loading {len(self.lidars)} lidars from {len(root)} folders')
