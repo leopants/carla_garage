@@ -700,7 +700,7 @@ class DataAgent(AutoPilot):
 
     ego_transform = self._vehicle.get_transform()
     ego_location = ego_transform.location
-    ego_wpt = self.world_map.get_waypoint(ego_location, lane_type=carla.libcarla.LaneType.Any)
+    ego_wpt = self.world_map.get_waypoint(ego_location, lane_type=carla.LaneType.Any)
 
     # Get the right offset
     if ego_wpt.lane_id < 0 and lane_offset != 0:

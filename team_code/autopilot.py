@@ -1757,13 +1757,13 @@ class AutoPilot(autonomous_agent_local.AutonomousAgent):
         self.close_traffic_lights.append([bounding_box, light.state, light.id, affects_ego])
 
         if self.visualize == 1:
-          if light.state == carla.libcarla.TrafficLightState.Red:
+          if light.state == carla.TrafficLightState.Red:
             color = carla.Color(255, 0, 0, 255)
-          elif light.state == carla.libcarla.TrafficLightState.Yellow:
+          elif light.state == carla.TrafficLightState.Yellow:
             color = carla.Color(255, 255, 0, 255)
-          elif light.state == carla.libcarla.TrafficLightState.Green:
+          elif light.state == carla.TrafficLightState.Green:
             color = carla.Color(0, 255, 0, 255)
-          elif light.state == carla.libcarla.TrafficLightState.Off:
+          elif light.state == carla.TrafficLightState.Off:
             color = carla.Color(0, 0, 0, 255)
           else:  # unknown
             color = carla.Color(0, 0, 255, 255)
@@ -2001,7 +2001,7 @@ class AutoPilot(autonomous_agent_local.AutonomousAgent):
     angle_radians = -math.atan2(-aim_y, aim_x)
 
     # Convert the angle from radians to degrees
-    angle_degrees = np.float_(math.degrees(angle_radians))
+    angle_degrees = np.float64(math.degrees(angle_radians))
 
     return angle_degrees
 

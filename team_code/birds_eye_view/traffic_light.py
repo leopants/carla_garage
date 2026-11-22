@@ -47,9 +47,9 @@ def _get_traffic_light_waypoints(traffic_light, carla_map):
     # loc_right = wpx.transform.location + 0.4 * wpx.lane_width * vec_right
     # stopline_vertices.append([loc_left, loc_right])
 
-    while not wpx.is_intersection:
+    while not wpx.is_junction:
       next_wp = wpx.next(0.5)[0]
-      if next_wp and not next_wp.is_intersection:
+      if next_wp and not next_wp.is_junction:
         wpx = next_wp
       else:
         break

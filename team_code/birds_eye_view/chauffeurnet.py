@@ -5,7 +5,7 @@ Code adapted from https://github.com/zhejz/carla-roach
 
 import numpy as np
 import carla
-from gym import spaces
+from gymnasium import spaces
 import cv2 as cv
 from collections import deque
 from pathlib import Path
@@ -85,7 +85,11 @@ class ObsManager(ObsManagerBase):
     self.criteria_stop = criteria_stop
 
     # splitting because for Town13 the name is 'Carla/Maps/Town13/Town13' instead of 'Town13'
-    maps_h5_path = self._map_dir / (self._world.get_map().name.split('/')[-1] + '.h5')
+    # The optimized layers (e.g. Town10HD_Opt) share the base map's geometry, so they use the same file.
+    map_name = self._world.get_map().name.split('/')[-1]
+    if map_name.endswith('_Opt'):
+      map_name = map_name[:-len('_Opt')]
+    maps_h5_path = self._map_dir / (map_name + '.h5')
     with h5py.File(maps_h5_path, 'r', libver='latest', swmr=True) as hf:
       self._road = np.array(hf['road'], dtype=np.uint8)
       self._lane_marking_all = np.array(hf['lane_marking_all'], dtype=np.uint8)
