@@ -736,6 +736,9 @@ class PrivilegedRoutePlanner(object):
         """
     # Get the name of the map
     map_name = carla_map.name.split("/")[-1]
+    # Speed limits are stored per base map; the optimized layers (e.g. Town10HD_Opt) share the base map's geometry.
+    if map_name.endswith("_Opt"):
+      map_name = map_name[:-len("_Opt")]
 
     # Load speed limit data from file
     file_name_speed_limits = f"team_code/speed_limits/{map_name}_speed_limits.npy"
