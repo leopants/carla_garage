@@ -5,10 +5,7 @@ Code adapted from https://github.com/zhejz/carla-roach
 
 import numpy as np
 import carla
-try:
-  from gym import spaces
-except ImportError:  # gym is unmaintained, gymnasium is a drop-in
-  from gymnasium import spaces
+from gymnasium import spaces
 import cv2 as cv
 from collections import deque
 from pathlib import Path
