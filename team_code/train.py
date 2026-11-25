@@ -937,6 +937,11 @@ class Engine(object):
 
   def train(self):
     self.model.train()
+    if int(os.environ.get('FREEZE_BN', 0)):
+      # Fine-tuning with tiny batches: keep the pretrained BatchNorm statistics fixed (affine params still train).
+      for m in self.model.modules():
+        if isinstance(m, torch.nn.modules.batchnorm._BatchNorm):
+          m.eval()
 
     num_batches = 0
     loss_epoch = 0.0

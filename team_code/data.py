@@ -45,7 +45,8 @@ class CARLA_Data(Dataset):  # pylint: disable=locally-disabled, invalid-name
     self.data_cache = shared_dict
     self.target_speed_bins = np.array(config.target_speed_bins)
     self.angle_bins = np.array(config.angle_bins)
-    self.converter = np.uint8(config.converter)
+    # CARLA 1.0 maps emit semantic ids beyond the 29 known ones (e.g. 29 on Town12): treat unknown ids as unlabeled
+    self.converter = np.uint8(list(config.converter) + [0] * (256 - len(config.converter)))
     self.bev_converter = np.uint8(config.bev_converter)
 
     self.images = []
@@ -689,8 +690,9 @@ class CARLA_Data(Dataset):  # pylint: disable=locally-disabled, invalid-name
     data['target_speed_twohot'] = target_speed_twohot
 
     if not self.config.use_plant:
-      lidar_bev = self.lidar_augmenter_func(image=np.transpose(lidar_bev, (1, 2, 0)))
-      data['lidar'] = np.transpose(lidar_bev, (2, 0, 1))
+      if self.lidar_augmenter_func is not None:  # None when imgaug is unavailable
+        lidar_bev = np.transpose(self.lidar_augmenter_func(image=np.transpose(lidar_bev, (1, 2, 0))), (2, 0, 1))
+      data['lidar'] = lidar_bev
 
     if self.config.detect_boxes or self.config.use_plant:
       data['bounding_boxes'] = bounding_boxes_padded
@@ -698,8 +700,10 @@ class CARLA_Data(Dataset):  # pylint: disable=locally-disabled, invalid-name
         data['future_bounding_boxes'] = future_bounding_boxes_padded
 
     if self.config.lidar_seq_len > 1 and not self.config.use_plant:
-      temporal_lidar_bev = self.lidar_augmenter_func(image=np.transpose(temporal_lidar_bev, (1, 2, 0)))
-      data['temporal_lidar'] = np.transpose(temporal_lidar_bev, (2, 0, 1))
+      if self.lidar_augmenter_func is not None:
+        temporal_lidar_bev = np.transpose(
+            self.lidar_augmenter_func(image=np.transpose(temporal_lidar_bev, (1, 2, 0))), (2, 0, 1))
+      data['temporal_lidar'] = temporal_lidar_bev
 
     data['steer'] = current_measurement['steer']
     data['throttle'] = current_measurement['throttle']
